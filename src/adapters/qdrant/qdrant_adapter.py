@@ -5,6 +5,7 @@ Implements VectorStorePort using Qdrant with payload-based ABAC filtering.
 
 from __future__ import annotations
 
+import uuid
 from typing import List
 
 import numpy as np
@@ -61,6 +62,8 @@ class QdrantAdapter(VectorStorePort):
         """Write chunk vectors and metadata to Qdrant."""
         points = []
         for chunk, vector in zip(chunks, vectors):
+            # Qdrant requires point ID to be an unsigned int or UUID
+            point_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, chunk.chunk_id))
             payload = {
                 "chunk_id": chunk.chunk_id,
                 "doc_id": chunk.doc_id,
@@ -74,7 +77,7 @@ class QdrantAdapter(VectorStorePort):
             }
             points.append(
                 qmodels.PointStruct(
-                    id=chunk.chunk_id,
+                    id=point_id,
                     vector=vector,
                     payload=payload,
                 )
