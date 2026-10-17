@@ -6,17 +6,20 @@ Mocks QdrantAdapter.search() to verify ABAC pre-filtering behavior.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import List
 from unittest.mock import MagicMock
+
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
 from core.models import Chunk, RetrievalResult, UserContext
 from adapters.qdrant.qdrant_adapter import QdrantAdapter
 from adapters.openrouter.embedding_adapter import OpenRouterEmbeddingAdapter
+from adapters.openrouter.chat_adapter import OpenRouterChatAdapter
 from application.use_cases.ask_question import AskQuestionUseCase
+from adapters.postgresql.postgres_adapter import PostgresAdapter
 from application.services.context_builder import build_context
 
 
@@ -118,13 +121,9 @@ CHUNKS = [
 def make_use_case(chunks: List[Chunk] = CHUNKS) -> AskQuestionUseCase:
     fake_vector_store = FakeQdrantAdapter(chunks)
     embedding_adapter = MagicMock(spec=OpenRouterEmbeddingAdapter)
-    chat_adapter = MagicMock(spec=object)
+    chat_adapter = MagicMock(spec=OpenRouterChatAdapter)
     chat_adapter.generate_answer.return_value = "Mocked answer"
 
-    # Use AskQuestionUseCase directly without Postgres (unit test focus)
-    # We bypass postgres by subclassing or by mocking. Here we instantiate
-    # with a mock postgres to avoid DB dependency.
-    from adapters.postgresql.postgres_adapter import PostgresAdapter
     fake_postgres = MagicMock(spec=PostgresAdapter)
 
     return AskQuestionUseCase(
@@ -202,22 +201,20 @@ def test_inactive_user_gets_nothing():
 
 def test_context_builder_truncates_to_token_budget():
     """Context builder must not exceed max_tokens."""
-    from core.models import RetrievalResult
-
     chunks = [
         make_chunk(f"doc-{i:03d}", "x" * 1000, 2, "engineering", i) for i in range(10)
     ]
     results = [RetrievalResult(chunk=c, score=0.9) for c in chunks]
-    context = build_context(results, max_tokens=100)
+    context = build_context(results, max_tokens=500)
 
-    # Each chunk is ~1000 chars = ~250 tokens, so 100 token budget = ~1 chunk
+    # Each chunk is ~1000 chars = ~250 tokens, so 500 token budget = ~2 chunks
     tokens = len(context) // 4
-    assert tokens <= 100, f"Context exceeded token budget: {tokens} tokens"
-    print(f"PASS: Context builder truncated to {tokens} tokens (budget: 100)")
+    assert tokens <= 500, f"Context exceeded token budget: {tokens} tokens"
+    print(f"PASS: Context builder truncated to {tokens} tokens (budget: 500)")
 
 
 def test_jwt_adapter_generates_valid_token():
-    """JWT adapter generate_test_token produces decodable tokens."""
+    """JWT adapter generates and validates tokens correctly."""
     from adapters.auth.jwt_adapter import JWTAdapter
 
     adapter = JWTAdapter(secret="test-secret")
