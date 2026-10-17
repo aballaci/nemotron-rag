@@ -8,7 +8,6 @@ from __future__ import annotations
 import uuid
 from typing import List
 
-import numpy as np
 from qdrant_client import QdrantClient
 from qdrant_client.http import models as qmodels
 
