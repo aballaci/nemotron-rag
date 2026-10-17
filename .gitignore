@@ -11,3 +11,19 @@ __pycache__/
 
 # Docker
 docker-compose.override.yml
+
+# Ori agent state
+.ori/
+.ori/**
+
+# Local overrides
+*.local
+*.local.yml
+
+# Temporary test artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+__pycache__/
+*.pyc
+*.pyo
