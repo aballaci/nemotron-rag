@@ -2,17 +2,32 @@
 
 Thin route: parse request → call use case → return response.
 Business logic lives in application/use_cases/ask_question.py.
+
+IMPORTANT (Documentation Handoff):
+  JWT authentication is currently a MOCK implementation.
+  The /ask endpoint uses a hardcoded UserContext (demo_user, tenant
+  t_acme_corp_001, department engineering, clearance_level 2) instead of
+  validating a real JWT.
+
+  The JWT adapter (src/adapters/auth/jwt_adapter.py) exists and is unit-tested,
+  but it is NOT wired into this route. To enable real auth, replace
+  _mock_user_context() with JWT validation:
+
+      token = extract_bearer_token(request.headers.get("Authorization"))
+      user_context = jwt_adapter.validate_token(token)
+
 """
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from adapters.openrouter.chat_adapter import OpenRouterChatAdapter
 from adapters.qdrant.qdrant_adapter import QdrantAdapter
 from adapters.openrouter.embedding_adapter import OpenRouterEmbeddingAdapter
 from application.use_cases.ask_question import AskQuestionUseCase
+from core.models import UserContext
 
 router = APIRouter()
 
@@ -41,38 +56,44 @@ class AskResponse(BaseModel):
     context_tokens_estimate: int | None = None
 
 
+# Module-level singletons (wired once at import time)
+_embedding = OpenRouterEmbeddingAdapter(
+    api_key="PLACEHOLDER",  # TODO: inject from settings/env
+)
+_vector_store = QdrantAdapter()
+_chat = OpenRouterChatAdapter(
+    api_key="PLACEHOLDER",  # TODO: inject from settings/env
+)
+use_case = AskQuestionUseCase(
+    embedding_adapter=_embedding,
+    vector_store=_vector_store,
+    chat_adapter=_chat,
+    postgres_adapter=None,  # Postgres audit logging not yet wired
+    top_k=5,
+)
+
+
+def _mock_user_context() -> UserContext:
+    """Temporary mock: returns a fixed UserContext instead of validating a JWT.
+
+    REPLACE WITH: token validation via JWTAdapter.validate_token(token)
+    """
+    return UserContext(
+        user_id="demo_user",
+        tenant_id="t_acme_corp_001",
+        roles=["engineer"],
+        department="engineering",
+        clearance_level=2,
+        location="US",
+        employment_status="active",
+    )
+
+
 @router.post("/ask", response_model=AskResponse)
 async def ask_question(request: AskRequest):
     """Answer a user question using RAG with ABAC-pre-filtered retrieval."""
     try:
-        # TODO: Extract UserContext from validated JWT via AuthPort
-        # For now, using a default test context.
-        # In production, JWT validation happens at the gateway/middleware layer
-        # and user attributes are injected here.
-        from core.models import UserContext
-
-        user_context = UserContext(
-            user_id="demo_user",
-            tenant_id="t_acme_corp_001",
-            roles=["engineer"],
-            department="engineering",
-            clearance_level=2,
-            location="US",
-            employment_status="active",
-        )
-
-        embedding_adapter = OpenRouterEmbeddingAdapter(
-            api_key="PLACEHOLDER",  # TODO: inject from settings/env
-        )
-        vector_store = QdrantAdapter()
-        chat_adapter = OpenRouterChatAdapter(api_key="PLACEHOLDER")
-
-        use_case = AskQuestionUseCase(
-            embedding_adapter=embedding_adapter,
-            vector_store=vector_store,
-            chat_adapter=chat_adapter,
-            top_k=request.top_k,
-        )
+        user_context = _mock_user_context()
 
         result = use_case.execute(
             question=request.question,
