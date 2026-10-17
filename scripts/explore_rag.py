@@ -12,7 +12,7 @@ Tests cover:
   4. Stranger (Different tenant) — any query (should get NOTHING)
   5. Alice (Clearance 2) — public press release (should work, Tier 1)
   6. Diana (Legal, Clearance 4) — M&A restricted query (should GET Tier 4)
-  7. Empty/irrelevant query (should gracefully refuse)
+  7. Irrelevant query (should gracefully refuse)
 """
 
 from __future__ import annotations
@@ -20,12 +20,14 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
+from unittest.mock import MagicMock
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from adapters.qdrant.qdrant_adapter import QdrantAdapter
 from adapters.openrouter.embedding_adapter import OpenRouterEmbeddingAdapter
 from adapters.openrouter.chat_adapter import OpenRouterChatAdapter
+from adapters.postgresql.postgres_adapter import PostgresAdapter
 from application.use_cases.ask_question import AskQuestionUseCase
 from core.models import UserContext
 
@@ -78,11 +80,13 @@ def main():
     embedding = OpenRouterEmbeddingAdapter(api_key=api_key)
     vector_store = QdrantAdapter(host="localhost", port=6333)
     chat = OpenRouterChatAdapter(api_key=api_key)
+    mock_postgres = MagicMock(spec=PostgresAdapter)
 
     use_case = AskQuestionUseCase(
         embedding_adapter=embedding,
         vector_store=vector_store,
         chat_adapter=chat,
+        postgres_adapter=mock_postgres,
         top_k=5,
     )
 
