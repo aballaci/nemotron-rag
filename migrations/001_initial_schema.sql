@@ -49,5 +49,4 @@ CREATE TABLE IF NOT EXISTS audit_log (
 CREATE INDEX IF NOT EXISTS idx_audit_user_id ON audit_log(user_id);
 CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_log(timestamp);
 
--- Enable uuid-generate-v4 extension if not present
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
