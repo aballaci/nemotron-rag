@@ -1,20 +1,3 @@
-# docker-compose.yml
-
-# Phase 0 / Phase 1 infrastructure for the RAG agent on ace.
-#
-# All services run on an internal Docker network (`rag-internal`).
-# No service ports are published to the host; they are reachable only
-# from other containers on the same network. The only outbound internet
-# traffic from ace is to OpenRouter (https://openrouter.ai/api/v1).
-#
-# Usage:
-#   cp .env.example .env
-#   # edit .env with your values
-#   docker compose up -d
-#
-# Testing from inside the network:
-#   docker compose exec qdrant curl localhost:6333/health
-
 version: "3.9"
 
 services:
@@ -60,29 +43,6 @@ services:
       retries: 5
 
   ########################################################################
-  # MinIO — raw document object store (pre-chunking)
-  ########################################################################
-  minio:
-    image: minio/minio:latest
-    container_name: rag-minio
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: rag
-      MINIO_ROOT_PASSWORD_FILE: /run/secrets/minio_password
-    secrets:
-      - minio_password
-    volumes:
-      - minio_data:/data
-    networks:
-      - rag-internal
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  ########################################################################
   # Redis — job queue / event bus for ingestion
   ########################################################################
   redis:
@@ -102,12 +62,11 @@ services:
 networks:
   rag-internal:
     driver: bridge
-    internal: true   # no internet egress from containers; outbound only via host
+    internal: true
 
 volumes:
   pg_data:
   qdrant_data:
-  minio_data:
   redis_data:
 
 secrets:
