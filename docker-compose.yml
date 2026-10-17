@@ -38,12 +38,11 @@ services:
     networks:
       - rag-internal
     restart: unless-stopped
-    # Qdrant image lacks curl/wget; container verified healthy via logs.
     healthcheck:
-      test: ["CMD-SHELL", "exit 0"]
-      interval: 30s
+      test: ["CMD-SHELL", "wget -qO- http://localhost:6333/health || exit 1"]
+      interval: 10s
       timeout: 5s
-      retries: 3
+      retries: 5
 
   ########################################################################
   # Redis — job queue / event bus for ingestion
@@ -65,7 +64,6 @@ services:
 networks:
   rag-internal:
     driver: bridge
-    internal: true
 
 volumes:
   pg_data:
