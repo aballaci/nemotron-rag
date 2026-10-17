@@ -114,16 +114,16 @@ class QdrantAdapter(VectorStorePort):
             ]
         )
 
-        search_result = self.client.search(
+        search_result = self.client.query_points(
             collection_name=COLLECTION_NAME,
-            query_vector=query_vector,
+            query=query_vector,
             query_filter=filter_conditions,
             limit=top_k,
             with_payload=True,
         )
 
         results: List[RetrievalResult] = []
-        for hit in search_result:
+        for hit in search_result.points:
             payload = hit.payload or {}
             chunk = Chunk(
                 chunk_id=payload.get("chunk_id", ""),
