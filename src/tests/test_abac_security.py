@@ -7,8 +7,11 @@ Mocks QdrantAdapter.search() to verify ABAC pre-filtering behavior.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import sys
+from pathlib import Path
 from typing import List
 from unittest.mock import MagicMock
+sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
 from core.models import Chunk, RetrievalResult, UserContext
 from adapters.qdrant.qdrant_adapter import QdrantAdapter
