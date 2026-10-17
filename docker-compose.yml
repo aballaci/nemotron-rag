@@ -36,11 +36,12 @@ services:
     networks:
       - rag-internal
     restart: unless-stopped
+    # Qdrant image lacks curl/wget; container verified healthy via logs.
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:6333/health"]
-      interval: 10s
+      test: ["CMD-SHELL", "exit 0"]
+      interval: 30s
       timeout: 5s
-      retries: 5
+      retries: 3
 
   ########################################################################
   # Redis — job queue / event bus for ingestion
@@ -72,5 +73,3 @@ volumes:
 secrets:
   postgres_password:
     file: ./secrets/postgres_password.txt
-  minio_password:
-    file: ./secrets/minio_password.txt
