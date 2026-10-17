@@ -1,0 +1,13 @@
+# Secrets directory — never commit actual secret files.
+secrets/*.txt
+
+# Environment
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# Docker
+docker-compose.override.yml

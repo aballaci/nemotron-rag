@@ -1,0 +1,39 @@
+# Audit Log Schema
+
+```json
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "RAG Query Audit Log",
+  "type": "object",
+  "required": [
+    "event_id",
+    "timestamp",
+    "user_id",
+    "query_hash",
+    "retrieved_chunk_ids",
+    "model",
+    "latency_ms",
+    "tier_filter_applied",
+    "answer_generated"
+  ],
+  "properties": {
+    "event_id": { "type": "string" },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "user_id": { "type": "string" },
+    "query_hash": { "type": "string", "description": "SHA-256 of the raw question (PII-safe)" },
+    "retrieved_chunk_ids": { "type": "array", "items": { "type": "string" } },
+    "model": { "type": "string" },
+    "latency_ms": { "type": "integer" },
+    "tier_filter_applied": { "type": "boolean" },
+    "answer_generated": { "type": "boolean" },
+    "refusal_reason": { "type": "string" }
+  }
+}
+```
+
+## Retention
+- Keep audit logs for at least 12 months.
+- Logs are append-only; no updates or deletes.
+
+## Related
+- `process/dod.md` — Phase 4 requires audit log spot-check.

@@ -1,0 +1,170 @@
+openapi: 3.0.3
+info:
+  title: Nemotron RAG Agent Query API
+  version: 1.0.0
+  description: |
+    Ask questions against a private company knowledge base.
+    All retrieval is pre-filtered by ABAC attributes derived from the JWT.
+servers:
+  - url: http://localhost:8000
+    description: Local development on ace
+security:
+  - BearerAuth: []
+paths:
+  /ask:
+    post:
+      summary: Ask a question and receive a grounded answer
+      operationId: askQuestion
+      tags:
+        - query
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AskRequest'
+      responses:
+        '200':
+          description: Grounded answer with citations
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AskResponse'
+        '400':
+          description: Invalid request (empty question, missing JWT)
+        '401':
+          description: Unauthorized — invalid or expired JWT
+        '403':
+          description: Forbidden — no authorized context available
+        '422':
+          description: Validation error
+        '500':
+          description: Internal server error
+  /ingest:
+    post:
+      summary: Submit a document for ingestion (enqueues background job)
+      operationId: ingestDocument
+      tags:
+        - ingestion
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IngestRequest'
+      responses:
+        '202':
+          description: Ingestion job accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IngestResponse'
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden — insufficient classification rights
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        JWT must contain subject attributes:
+        sub, roles, department, clearance_level, location, employment_status, contractor
+  schemas:
+    AskRequest:
+      type: object
+      required:
+        - question
+      properties:
+        question:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          example: "What does John Grey and my neighbours kids have in common?"
+        top_k:
+          type: integer
+          minimum: 1
+          maximum: 20
+          default: 5
+          description: Maximum number of retrieved chunks to consider
+    AskResponse:
+      type: object
+      required:
+        - answer
+        - sources
+        - retrieved_chunk_ids
+      properties:
+        answer:
+          type: string
+          example: "They both like salty caramel."
+        sources:
+          type: array
+          items:
+            $ref: '#/components/schemas/SourceCitation'
+        retrieved_chunk_ids:
+          type: array
+          items:
+            type: string
+        model:
+          type: string
+          example: "nvidia/nemotron-3.5-super-vl"
+        latency_ms:
+          type: integer
+    SourceCitation:
+      type: object
+      required:
+        - chunk_id
+        - doc_id
+        - confidentiality_level
+        - department
+      properties:
+        chunk_id:
+          type: string
+        doc_id:
+          type: string
+        text_snippet:
+          type: string
+          maxLength: 200
+        confidentiality_level:
+          type: integer
+        department:
+          type: string
+    IngestRequest:
+      type: object
+      required:
+        - doc_id
+        - confidentiality_level
+        - department
+      properties:
+        doc_id:
+          type: string
+        confidentiality_level:
+          type: integer
+          minimum: 1
+          maximum: 4
+        department:
+          type: string
+        classification:
+          type: string
+        owner:
+          type: string
+        source_path:
+          type: string
+          description: MinIO object path to the raw document
+    IngestResponse:
+      type: object
+      required:
+        - job_id
+        - status
+      properties:
+        job_id:
+          type: string
+        status:
+          type: string
+          enum: [queued, processing, completed, failed]
+        estimated_completion_seconds:
+          type: integer

@@ -1,0 +1,117 @@
+# docker-compose.yml
+
+# Phase 0 / Phase 1 infrastructure for the RAG agent on ace.
+#
+# All services run on an internal Docker network (`rag-internal`).
+# No service ports are published to the host; they are reachable only
+# from other containers on the same network. The only outbound internet
+# traffic from ace is to OpenRouter (https://openrouter.ai/api/v1).
+#
+# Usage:
+#   cp .env.example .env
+#   # edit .env with your values
+#   docker compose up -d
+#
+# Testing from inside the network:
+#   docker compose exec qdrant curl localhost:6333/health
+
+version: "3.9"
+
+services:
+  ########################################################################
+  # PostgreSQL — metadata store + RLS second gate
+  ########################################################################
+  postgres:
+    image: postgres:15-alpine
+    container_name: rag-postgres
+    environment:
+      POSTGRES_DB: rag
+      POSTGRES_USER: rag
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets:
+      - postgres_password
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d:ro
+    networks:
+      - rag-internal
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rag -d rag"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  ########################################################################
+  # Qdrant — vector store with payload filtering for ABAC
+  ########################################################################
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: rag-qdrant
+    volumes:
+      - qdrant_data:/qdrant/storage
+    networks:
+      - rag-internal
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  ########################################################################
+  # MinIO — raw document object store (pre-chunking)
+  ########################################################################
+  minio:
+    image: minio/minio:latest
+    container_name: rag-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: rag
+      MINIO_ROOT_PASSWORD_FILE: /run/secrets/minio_password
+    secrets:
+      - minio_password
+    volumes:
+      - minio_data:/data
+    networks:
+      - rag-internal
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  ########################################################################
+  # Redis — job queue / event bus for ingestion
+  ########################################################################
+  redis:
+    image: redis:7-alpine
+    container_name: rag-redis
+    volumes:
+      - redis_data:/data
+    networks:
+      - rag-internal
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+networks:
+  rag-internal:
+    driver: bridge
+    internal: true   # no internet egress from containers; outbound only via host
+
+volumes:
+  pg_data:
+  qdrant_data:
+  minio_data:
+  redis_data:
+
+secrets:
+  postgres_password:
+    file: ./secrets/postgres_password.txt
+  minio_password:
+    file: ./secrets/minio_password.txt
