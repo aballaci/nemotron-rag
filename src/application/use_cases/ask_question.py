@@ -14,7 +14,11 @@ from adapters.openrouter.chat_adapter import OpenRouterChatAdapter
 from adapters.qdrant.qdrant_adapter import QdrantAdapter
 from adapters.openrouter.embedding_adapter import OpenRouterEmbeddingAdapter
 from adapters.postgresql.postgres_adapter import PostgresAdapter
-from application.services.context_builder import build_context, build_system_prompt
+from application.services.context_builder import (
+    build_context,
+    build_general_prompt,
+    build_system_prompt,
+)
 from core.models import UserContext
 
 
@@ -70,6 +74,12 @@ class AskQuestionUseCase:
         query_hash = hashlib.sha256(question.encode("utf-8")).hexdigest()
 
         if not context_block:
+            # Nothing authorized/retrieved: call the model normally.
+            answer = self.chat.generate_answer(
+                system_prompt=build_general_prompt(),
+                user_question=question,
+                temperature=0.2,
+            )
             self._audit(
                 user_id=user_context.user_id,
                 query_hash=query_hash,
@@ -81,7 +91,7 @@ class AskQuestionUseCase:
                 refusal_reason="no_authorized_context",
             )
             return {
-                "answer": "I could not find any relevant information in the knowledge base for your question.",
+                "answer": answer,
                 "sources": [],
                 "retrieved_chunk_ids": [],
                 "model": "nvidia/nemotron-3.5-super-vl",
@@ -112,8 +122,14 @@ class AskQuestionUseCase:
         )
 
         # 7. Build source citations
+        # Only report chunks the model actually cited; an answer from general
+        # knowledge cites none and so reports no sources.
+        cited = [
+            r for r in results
+            if f"{r.chunk.doc_id}#{r.chunk.chunk_index}" in answer
+        ]
         sources = []
-        for result in results:
+        for result in cited:
             chunk = result.chunk
             sources.append(
                 {
@@ -132,7 +148,7 @@ class AskQuestionUseCase:
             "sources": sources,
             "retrieved_chunk_ids": [r.chunk.chunk_id for r in results],
             "model": "nvidia/nemotron-3.5-super-vl",
-            "context_used": True,
+            "context_used": bool(cited),
             "context_tokens_estimate": len(context_block) // 4,
             "latency_ms": latency_ms,
         }

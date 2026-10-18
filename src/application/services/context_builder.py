@@ -54,17 +54,19 @@ def build_context(
 
 
 def build_system_prompt(context_block: str) -> str:
-    """Build the system prompt with grounded instructions."""
-    return f"""You are an enterprise knowledge assistant. Answer the user's question using ONLY the provided context.
+    """Build the system prompt: use the context when relevant, else answer normally."""
+    return f"""You are an enterprise knowledge assistant. Company knowledge base excerpts are provided below as context.
 
 Rules:
-- Base your answer exclusively on the context below.
-- If the answer is not in the context, say so explicitly.
-- Do not hallucinate or infer beyond the provided text.
-- Cite sources using the chunk reference format shown in context (e.g., doc-005#0).
+- If the context contains information relevant to the question, base your answer on it and cite the chunks you used with the reference format shown in context (e.g., doc-005#0).
+- If the context is not relevant to the question, ignore it and answer from your own general knowledge as a normal assistant. Do not cite any chunks and do not mention the context or the knowledge base.
+- Never present general knowledge as coming from company documents, and never invent company-specific facts that are not in the context.
 - Keep answers concise and directly relevant.
 
 Context:
-{context_block}
+{context_block}"""
 
-Answer based on the context above."""
+
+def build_general_prompt() -> str:
+    """System prompt used when no authorized context was retrieved."""
+    return "You are a helpful assistant. Answer the user's question concisely."
