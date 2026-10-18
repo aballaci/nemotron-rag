@@ -61,6 +61,90 @@ services:
       timeout: 5s
       retries: 5
 
+  ########################################################################
+  # Silo — MinIO-compatible object store for raw documents
+  ########################################################################
+  silo:
+    image: docker.io/pgsty/silo:RELEASE.2026-09-16T00-00-00Z
+    container_name: rag-silo
+    environment:
+      MINIO_ROOT_USER: silo-admin
+      MINIO_ROOT_PASSWORD_FILE: /run/secrets/silo_password
+    secrets:
+      - silo_password
+    volumes:
+      - silo_data:/data
+    networks:
+      - rag-internal
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mcli", "admin", "info", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  ########################################################################
+  # FastAPI API — orchestration, agent loop, RAG endpoints
+  ########################################################################
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+    container_name: rag-api
+    environment:
+      OPENROUTER_API_KEY_FILE: /run/secrets/openrouter_api_key
+      OPENROUTER_BASE_URL: https://openrouter.ai/api/v1
+      OPENROUTER_CHAT_MODEL: nvidia/nemotron-3.5-super-vl
+      EMBED_MODEL_ID: nvidia/nemotron-3-embed-1b:free
+      POSTGRES_DB: rag
+      POSTGRES_USER: rag
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      QDRANT_URL: http://qdrant:6333
+      QDRANT_COLLECTION: company_knowledge
+      REDIS_URL: redis://rag-redis:6379
+      JWT_SECRET_FILE: /run/secrets/jwt_secret
+      JWT_ALGORITHM: HS256
+    secrets:
+      - openrouter_api_key
+      - postgres_password
+      - jwt_secret
+    volumes:
+      - ./src:/app/src:ro
+    networks:
+      - rag-internal
+    restart: unless-stopped
+    depends_on:
+      qdrant:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/docs')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  ########################################################################
+  # Streamlit UI — chat + ingestion frontend
+  ########################################################################
+  ui:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.ui
+    container_name: rag-ui
+    environment:
+      RAG_API_BASE_URL: http://host.docker.internal:8000
+    ports:
+      - "127.0.0.1:8501:8501"
+    volumes:
+      - ./src:/app/src:ro
+    networks:
+      - rag-internal
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+
 networks:
   rag-internal:
     driver: bridge
@@ -69,7 +153,14 @@ volumes:
   pg_data:
   qdrant_data:
   redis_data:
+  silo_data:
 
 secrets:
   postgres_password:
     file: ./secrets/postgres_password.txt
+  silo_password:
+    file: ./secrets/silo_password.txt
+  openrouter_api_key:
+    file: ./secrets/openrouter_api_key.txt
+  jwt_secret:
+    file: ./secrets/jwt_secret.txt

@@ -1,0 +1,13 @@
+FROM python:3.14-slim
+
+WORKDIR /app
+
+RUN pip install --no-cache-dir fastapi uvicorn httpx pydantic qdrant-client
+
+COPY src /app/src
+
+ENV PYTHONPATH=/app/src
+
+EXPOSE 8000
+
+CMD ["uvicorn", "main:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]

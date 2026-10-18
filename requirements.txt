@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+httpx
+pydantic
+qdrant-client
+psycopg2-binary
+streamlit
+requests
