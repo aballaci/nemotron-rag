@@ -27,3 +27,6 @@ htmlcov/
 __pycache__/
 *.pyc
 *.pyo
+
+# Local raw-document store (runtime artifact, regenerate with scripts/generate_test_data.py)
+data/
