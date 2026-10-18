@@ -6,3 +6,4 @@ qdrant-client
 psycopg2-binary
 streamlit
 requests
+PyJWT[crypto]

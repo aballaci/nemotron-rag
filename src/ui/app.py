@@ -18,9 +18,28 @@ import streamlit as st
 API_BASE = os.getenv("RAG_API_BASE_URL", "http://localhost:8000")
 
 
+def _auth_headers() -> dict[str, str]:
+    """Return Authorization header if a JWT token is stored in session state."""
+    token = st.session_state.get("jwt_token", "")
+    if not token:
+        return {}
+    return {"Authorization": f"Bearer {token}"}
+
+
 def _post(path: str, payload: dict[str, Any]) -> dict[str, Any]:
     try:
-        resp = requests.post(f"{API_BASE}{path}", json=payload, timeout=120)
+        resp = requests.post(
+            f"{API_BASE}{path}",
+            json=payload,
+            headers=_auth_headers(),
+            timeout=120,
+        )
+        if resp.status_code == 401:
+            st.error(
+                "Authentication failed: invalid or missing JWT. "
+                "Enter a valid token in the sidebar."
+            )
+            return {}
         resp.raise_for_status()
         return resp.json()
     except requests.RequestException as exc:  # noqa: BLE001
@@ -123,6 +142,21 @@ def main() -> None:
     st.set_page_config(page_title="Nemotron RAG", page_icon="🔍", layout="wide")
     st.title("🔍 Nemotron RAG Agent")
     st.caption("Private knowledge base with ABAC-filtered retrieval via OpenRouter / Nemotron.")
+
+    with st.sidebar:
+        st.header("Authentication")
+        token = st.text_input(
+            "JWT Bearer Token",
+            type="password",
+            value=st.session_state.get("jwt_token", ""),
+            help="Generate a dev token via the JWT adapter. See README Authentication section.",
+        )
+        if token:
+            st.session_state.jwt_token = token
+            st.success("Token set")
+        else:
+            st.session_state.pop("jwt_token", None)
+            st.warning("No token — API calls will return 401")
 
     tab_ask, tab_ingest = st.tabs(["Ask", "Ingest"])
     with tab_ask:

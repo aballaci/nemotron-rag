@@ -18,6 +18,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 
 from adapters.auth.jwt_adapter import JWTAdapter
+from adapters.auth.settings import load_jwt_secret
 from adapters.openrouter.embedding_adapter import OpenRouterEmbeddingAdapter
 from adapters.openrouter.settings import load_openrouter_api_key
 from adapters.qdrant.qdrant_adapter import QdrantAdapter
@@ -27,9 +28,7 @@ from core.models import UserContext
 router = APIRouter()
 bearer_scheme = HTTPBearer(auto_error=False)
 
-_jwt = JWTAdapter(
-    secret=os.getenv("JWT_SECRET", "changeme-please-replace-with-a-strong-secret")
-)
+_jwt = JWTAdapter(secret=load_jwt_secret())
 
 
 def get_current_user(

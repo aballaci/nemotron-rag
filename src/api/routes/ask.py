@@ -19,6 +19,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 
 from adapters.auth.jwt_adapter import JWTAdapter
+from adapters.auth.settings import load_jwt_secret
 from adapters.openrouter.chat_adapter import OpenRouterChatAdapter
 from adapters.openrouter.settings import load_openrouter_api_key
 from adapters.openrouter.embedding_adapter import OpenRouterEmbeddingAdapter
@@ -34,15 +35,7 @@ bearer_scheme = HTTPBearer(auto_error=False)
 _embedding = OpenRouterEmbeddingAdapter(api_key=load_openrouter_api_key())
 _vector_store = QdrantAdapter()
 _chat = OpenRouterChatAdapter(api_key=load_openrouter_api_key())
-_jwt_secret = os.getenv("JWT_SECRET", "changeme-please-replace-with-a-strong-secret")
-if _jwt_secret == "changeme-please-replace-with-a-strong-secret":
-    import sys
-
-    print(
-        "WARNING: JWT_SECRET is using the default insecure value. "
-        "Set JWT_SECRET in .env before production use.",
-        file=sys.stderr,
-    )
+_jwt_secret = load_jwt_secret()
 _jwt = JWTAdapter(secret=_jwt_secret)
 _postgres_dsn = os.getenv(
     "POSTGRES_DSN",
