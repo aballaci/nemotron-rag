@@ -1,15 +1,18 @@
 """OpenRouter chat adapter.
 
-Calls OpenRouter /chat/completions with nvidia/nemotron-3.5-super-vl.
+Calls OpenRouter /chat/completions with the model configured via
+OPENROUTER_CHAT_MODEL (defaults to nvidia/nemotron-3.5-super-vl:free).
 """
 
 from __future__ import annotations
+
+import os
 
 import requests
 
 from ports.chat_model_port import ChatModelPort
 
-CHAT_MODEL_ID = "nvidia/nemotron-3.5-super-vl"
+CHAT_MODEL_ID = os.getenv("OPENROUTER_CHAT_MODEL", "nvidia/nemotron-3.5-super-vl:free")
 
 
 class OpenRouterChatAdapter(ChatModelPort):

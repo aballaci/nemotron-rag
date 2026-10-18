@@ -1,38 +1,90 @@
 """FastAPI routes for query (ask) endpoint.
 
-Thin route: parse request → call use case → return response.
+Thin route: parse request → validate JWT → call use case → return response.
 Business logic lives in application/use_cases/ask_question.py.
 
-IMPORTANT (Documentation Handoff):
-  JWT authentication is currently a MOCK implementation.
-  The /ask endpoint uses a hardcoded UserContext (demo_user, tenant
-  t_acme_corp_001, department engineering, clearance_level 2) instead of
-  validating a real JWT.
-
-  The JWT adapter (src/adapters/auth/jwt_adapter.py) exists and is unit-tested,
-  but it is NOT wired into this route. To enable real auth, replace
-  _mock_user_context() with JWT validation:
-
-      token = extract_bearer_token(request.headers.get("Authorization"))
-      user_context = jwt_adapter.validate_token(token)
-
+Security:
+  - Requires a valid Bearer JWT on the Authorization header.
+  - JWT is validated via JWTAdapter, producing the UserContext used for ABAC.
+  - Every query is written to the PostgreSQL audit log.
 """
 
 from __future__ import annotations
 
-from typing import List
+import os
+from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 
+from adapters.auth.jwt_adapter import JWTAdapter
 from adapters.openrouter.chat_adapter import OpenRouterChatAdapter
-from adapters.qdrant.qdrant_adapter import QdrantAdapter
 from adapters.openrouter.settings import load_openrouter_api_key
 from adapters.openrouter.embedding_adapter import OpenRouterEmbeddingAdapter
+from adapters.postgresql.postgres_adapter import PostgresAdapter
+from adapters.qdrant.qdrant_adapter import QdrantAdapter
 from application.use_cases.ask_question import AskQuestionUseCase
 from core.models import UserContext
 
 router = APIRouter()
+bearer_scheme = HTTPBearer(auto_error=False)
+
+# Module-level adapters (wired once at import time)
+_embedding = OpenRouterEmbeddingAdapter(api_key=load_openrouter_api_key())
+_vector_store = QdrantAdapter()
+_chat = OpenRouterChatAdapter(api_key=load_openrouter_api_key())
+_jwt_secret = os.getenv("JWT_SECRET", "changeme-please-replace-with-a-strong-secret")
+if _jwt_secret == "changeme-please-replace-with-a-strong-secret":
+    import sys
+
+    print(
+        "WARNING: JWT_SECRET is using the default insecure value. "
+        "Set JWT_SECRET in .env before production use.",
+        file=sys.stderr,
+    )
+_jwt = JWTAdapter(secret=_jwt_secret)
+_postgres_dsn = os.getenv(
+    "POSTGRES_DSN",
+    "postgresql://{user}:{password}@{host}:{port}/{db}".format(
+        user=os.getenv("POSTGRES_USER", "rag"),
+        password=os.getenv("POSTGRES_PASSWORD", "changeme"),
+        host=os.getenv("POSTGRES_HOST", "localhost"),
+        port=os.getenv("POSTGRES_PORT", "5432"),
+        db=os.getenv("POSTGRES_DB", "rag"),
+    ),
+)
+_postgres = PostgresAdapter(dsn=_postgres_dsn)
+use_case = AskQuestionUseCase(
+    embedding_adapter=_embedding,
+    vector_store=_vector_store,
+    chat_adapter=_chat,
+    postgres_adapter=_postgres,
+    top_k=5,
+)
+
+
+def get_current_user(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
+) -> UserContext:
+    """Validate the Bearer JWT and return the authenticated UserContext.
+
+    Raises 401 if no token or invalid/expired token.
+    """
+    if credentials is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing Authorization: Bearer <token> header",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    try:
+        return _jwt.validate_token(credentials.credentials)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Invalid or expired token: {exc}",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
 
 class AskRequest(BaseModel):
@@ -59,45 +111,17 @@ class AskResponse(BaseModel):
     context_tokens_estimate: int | None = None
 
 
-# Module-level singletons (wired once at import time)
-_embedding = OpenRouterEmbeddingAdapter(
-    api_key=load_openrouter_api_key(),
-)
-_vector_store = QdrantAdapter()
-_chat = OpenRouterChatAdapter(
-    api_key=load_openrouter_api_key(),
-)
-use_case = AskQuestionUseCase(
-    embedding_adapter=_embedding,
-    vector_store=_vector_store,
-    chat_adapter=_chat,
-    postgres_adapter=None,  # Postgres audit logging not yet wired
-    top_k=5,
-)
-
-
-def _mock_user_context() -> UserContext:
-    """Temporary mock: returns a fixed UserContext instead of validating a JWT.
-
-    REPLACE WITH: token validation via JWTAdapter.validate_token(token)
-    """
-    return UserContext(
-        user_id="demo_user",
-        tenant_id="t_acme_corp_001",
-        roles=["engineer"],
-        department="engineering",
-        clearance_level=2,
-        location="US",
-        employment_status="active",
-    )
-
-
 @router.post("/ask", response_model=AskResponse)
-async def ask_question(request: AskRequest):
-    """Answer a user question using RAG with ABAC-pre-filtered retrieval."""
-    try:
-        user_context = _mock_user_context()
+async def ask_question(
+    request: AskRequest,
+    user_context: UserContext = Depends(get_current_user),
+):
+    """Answer a user question using RAG with ABAC-pre-filtered retrieval.
 
+    The user_context (tenant, department, clearance) is derived from the
+    validated JWT and drives ABAC pre-filtering in Qdrant.
+    """
+    try:
         result = use_case.execute(
             question=request.question,
             user_context=user_context,
@@ -122,5 +146,7 @@ async def ask_question(request: AskRequest):
             context_used=result["context_used"],
             context_tokens_estimate=result.get("context_tokens_estimate"),
         )
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))

@@ -36,9 +36,19 @@ class AskQuestionUseCase:
         self.top_k = top_k
 
     def _audit(self, **kwargs) -> None:
-        """Write an audit record if a Postgres adapter is configured."""
-        if self.postgres is not None:
+        """Write an audit record if a Postgres adapter is configured.
+
+        Fail-closed on config, fail-open at runtime: a DB outage must not
+        block an authorized query. Audit errors are logged to stderr only.
+        """
+        if self.postgres is None:
+            return
+        try:
             self.postgres.log_audit(**kwargs)
+        except Exception:  # noqa: BLE001 - audit must not block the query path
+            import sys
+
+            print(f"audit log failed: {kwargs.get('query_hash')}", file=sys.stderr)
 
     def execute(
         self,

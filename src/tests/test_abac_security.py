@@ -242,3 +242,96 @@ if __name__ == "__main__":
     test_context_builder_truncates_to_token_budget()
     test_jwt_adapter_generates_valid_token()
     print("\nAll unit tests passed!")
+
+
+# ---------------------------------------------------------------------------
+# Auth requirement tests
+# ---------------------------------------------------------------------------
+def test_ask_route_requires_valid_jwt():
+    """The /ask route must reject requests without a valid Bearer JWT."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from api.routes import ask as ask_module
+
+    # Build a minimal app so TestClient has proper middleware stack.
+    app = FastAPI()
+    app.include_router(ask_module.router, prefix="/api/v1")
+    client = TestClient(app)
+
+    # No Authorization header -> 401
+    resp = client.post("/api/v1/ask", json={"question": "hi"})
+    assert resp.status_code == 401, f"expected 401, got {resp.status_code}: {resp.text}"
+
+    # Invalid token -> 401
+    resp = client.post(
+        "/api/v1/ask",
+        json={"question": "hi"},
+        headers={"Authorization": "Bearer not-a-real-token"},
+    )
+    assert resp.status_code == 401, f"expected 401, got {resp.status_code}: {resp.text}"
+
+    # Valid token -> proceeds past auth (may fail later on OpenRouter, but not 401)
+    # Route's JWTAdapter uses JWT_SECRET env (default insecure value).
+    # Generate the token with the same secret so signature verification passes.
+    adapter = ask_module.JWTAdapter(
+        secret="changeme-please-replace-with-a-strong-secret"
+    )
+    token = adapter.generate_test_token(
+        user_id="u_test", tenant_id="t_test", roles=["engineer"],
+        department="engineering", clearance_level=2,
+    )
+    resp = client.post(
+        "/api/v1/ask",
+        json={"question": "hi"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code != 401, f"valid token should not be 401: {resp.status_code} {resp.text}"
+
+    print("PASS: /ask requires a valid Bearer JWT")
+
+
+def test_ingest_route_requires_valid_jwt():
+    """The /ingest route must reject requests without a valid Bearer JWT."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from api.routes import ingestion as ingest_module
+
+    app = FastAPI()
+    app.include_router(ingest_module.router, prefix="/api/v1")
+    client = TestClient(app)
+
+    # No Authorization header -> 401
+    resp = client.post(
+        "/api/v1/ingest",
+        json={"doc_id": "d1", "title": "t", "text": "x", "confidentiality_level": 1,
+              "department": "eng", "classification": "c", "owner": "o",
+              "tenant_id": "t1", "source_path": "s"},
+    )
+    assert resp.status_code == 401, f"expected 401, got {resp.status_code}: {resp.text}"
+
+    # Invalid token -> 401
+    resp = client.post(
+        "/api/v1/ingest",
+        json={"doc_id": "d1", "title": "t", "text": "x", "confidentiality_level": 1,
+              "department": "eng", "classification": "c", "owner": "o",
+              "tenant_id": "t1", "source_path": "s"},
+        headers={"Authorization": "Bearer not-a-real-token"},
+    )
+    assert resp.status_code == 401, f"expected 401, got {resp.status_code}: {resp.text}"
+
+    print("PASS: /ingest requires a valid Bearer JWT")
+
+
+if __name__ == "__main__":
+    test_alice_clearance_2_cannot_see_tier_3()
+    test_marcus_clearance_3_can_see_tier_3()
+    test_diana_legal_cannot_see_engineering()
+    test_stranger_different_tenant_gets_nothing()
+    test_inactive_user_gets_nothing()
+    test_context_builder_truncates_to_token_budget()
+    test_jwt_adapter_generates_valid_token()
+    test_ask_route_requires_valid_jwt()
+    test_ingest_route_requires_valid_jwt()
+    print("\nAll unit tests passed!")
