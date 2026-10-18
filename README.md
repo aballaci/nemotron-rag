@@ -12,13 +12,14 @@ A multi-tier hybrid Retrieval-Augmented Generation (RAG) agent built on a single
 - Retrieves relevant context using hybrid semantic + keyword search, pre-filtered by user attributes.
 - Generates grounded answers via OpenRouter (`nvidia/nemotron-3.5-super-vl`) using only retrieved context.
 - Enforces confidentiality tiers (`public`, `internal`, `confidential`, `restricted`) at retrieval time so users never see unauthorized documents.
-- Logs every query and retrieved chunk for auditability.
+- Provides a Streamlit chat + ingestion UI on port 8501.
+- Logs every query and retrieved chunk for auditability (not yet wired; see Known limitations).
 
 ### What it does not do
 - No local model inference (no GPUs, no CUDA, no local Transformers serving).
 - No ACL user-lists stored on chunks (access is attribute- and policy-based).
 - No chat history or multi-turn conversation memory (stateless per request).
-- No built-in UI (API-first; console/client integration is external).
+- No authentication yet: `/api/v1/ask` uses a hardcoded demo `UserContext` (see Known limitations).
 
 ---
 
@@ -36,11 +37,12 @@ A multi-tier hybrid Retrieval-Augmented Generation (RAG) agent built on a single
 |-----------|---------------|----------|
 | Traefik / Nginx | TLS termination, routing, rate limiting | Public entry |
 | Keycloak / Authentik / OIDC stub | Authentication, issues JWT with subject attributes | Internal |
+| Streamlit UI | Chat + ingestion frontend | `ui` container, port 8501 |
 | FastAPI Orchestrator | API surface, agent loop, context building | Internal (`api` container) |
 | Ingestion Worker | Chunking, embedding, indexing (background) | Internal (`worker` container) |
 | PostgreSQL | Document metadata, chunk ACL attributes, audit log | Internal |
 | Qdrant | Vector store with payload filtering (cosine similarity, 2048-dim) | Internal |
-| MinIO | Raw document object store (pre-chunking) | Internal |
+| Silo (`pgsty/silo`, MinIO-compatible) | Raw document object store (pre-chunking) | Internal |
 | Redis | Job queue / event bus for ingestion | Internal |
 | OpenRouter | Embedding and chat model inference | External API (`https://openrouter.ai/api/v1`) |
 
@@ -97,7 +99,7 @@ Permission leakage is prevented by enforcing access **at the retrieval layer**, 
 | Background jobs | Redis + RQ / Celery |
 | Vector store | Qdrant |
 | Metadata store | PostgreSQL (Row-Level Security) |
-| Object store | MinIO (S3-compatible) |
+| Object store | Silo (MinIO-compatible) |
 | Embeddings | OpenRouter → `nvidia/nemotron-3-embed-1b:free` |
 | Chat | OpenRouter → `nvidia/nemotron-3.5-super-vl` |
 | Container orchestration | Docker Compose |
@@ -119,7 +121,7 @@ Recorded in `spec-kit/adr/`:
 
 ```
 nemotron-rag/
-├── docker-compose.yml          # Infrastructure (Postgres, Qdrant, MinIO, Redis)
+├── docker-compose.yml          # Postgres, Qdrant, Redis, Silo, API, UI
 ├── .env.example                # Environment template
 ├── .gitignore                  # Excludes .env, secrets, .venv
 ├── retrieval_test.py           # Verified OpenRouter RAG script (POC)
@@ -138,13 +140,14 @@ nemotron-rag/
 │   ├── ports/                  # Interface contracts
 │   ├── application/            # Use cases, agent loop, security filter
 │   ├── adapters/               # OpenRouter, Qdrant, Postgres, MinIO
+│   ├── ui/                     # Streamlit app (app.py)
 │   ├── api/                    # FastAPI routes
 │   ├── worker/                 # Ingestion tasks
 │   ├── config.py
 │   ├── container.py
 │   └── main.py
 ├── tests/                      # Unit + integration tests
-└── docker/                     # Dockerfiles
+└── docker/                     # Dockerfile.api, Dockerfile.ui
 ```
 
 Documentation and governance mirrors live in the Obsidian vault at `~/Documents/docs/nemotron-rag/`.
@@ -158,17 +161,49 @@ cd ~/dev/nemotron-rag
 
 cp .env.example .env
 chmod 600 .env
-# Edit .env: set OPENROUTER_API_KEY
 
+# Docker secrets (one file per secret, no trailing newline)
+echo -n "your-openrouter-key"   > secrets/openrouter_api_key.txt
 echo -n "your-postgres-password" > secrets/postgres_password.txt
-echo -n "your-minio-password"   > secrets/minio_password.txt
+echo -n "your-jwt-secret"       > secrets/jwt_secret.txt
+echo -n "your-silo-password"    > secrets/silo_password.txt
 chmod 600 secrets/*.txt
 
-docker compose up -d
+docker compose up -d --build
 docker compose ps
 ```
 
-Once the storage plane is healthy, proceed to Phase 1 (ingestion pipeline) and Phase 2 (query agent) as outlined in `spec-kit/process/dod.md`.
+### Endpoints
+
+| Service | URL | Notes |
+|---------|-----|-------|
+| Streamlit UI | `http://<host>:8501` | Published on `0.0.0.0:8501`. Reaching it from outside the LAN also needs a router port-forward and a firewall rule for 8501. |
+| API | internal only (`http://api:8000`) | Not published to the host. The UI reaches it over the `rag-internal` network. |
+| Qdrant | `127.0.0.1:6333` | Localhost only. |
+
+To call the API from the host, use `docker exec rag-api python -c ...` or temporarily add a `127.0.0.1:8000:8000` port mapping to the `api` service.
+
+### Secrets handling
+
+- `secrets/*.txt` and `.env` are gitignored. Only `.env.example` and `secrets/README.md` are tracked.
+- The API reads the OpenRouter key from the file named by `OPENROUTER_API_KEY_FILE` (set in `docker-compose.yml`, mounted from `secrets/openrouter_api_key.txt`). See `src/adapters/openrouter/settings.py`.
+- Never put a real key in source, compose environment values, or `.env.example`.
+
+### Troubleshooting
+
+- **UI not reachable:** `ui` waits for a healthy `api`. Check `docker compose ps -a` and `docker logs rag-api`; a crashing API leaves `ui` in `Created`.
+- **`/ask` returns 500:** the route returns `str(exc)` as the error detail and logs nothing. Reproduce with `docker exec rag-api python -c` against `http://localhost:8000/api/v1/ask` to see the detail. A `401` from OpenRouter means the key file is missing or invalid.
+- **Dependency errors in the API container:** `docker/Dockerfile.api` installs from `requirements.txt`; add new packages there and rebuild with `docker compose build api`.
+
+---
+
+## Known limitations
+
+- `rag-silo` crash-loops (the container prints its help text instead of starting). The API does not depend on it, but raw-document storage is unavailable until the command is fixed.
+- `/api/v1/ask` uses a hardcoded demo `UserContext` instead of validating a JWT.
+- Audit logging is skipped: `AskQuestionUseCase` is constructed with `postgres_adapter=None`, so no audit rows are written.
+- The Qdrant healthcheck uses `$line`, which Compose tries to interpolate (warning: `"line" variable is not set`). Escape it as `$$line`.
+- Local `secrets/*.txt` files may still contain placeholder values (e.g. `changeme`); replace them before any shared deployment.
 
 ---
 
