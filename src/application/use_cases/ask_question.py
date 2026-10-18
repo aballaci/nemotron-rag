@@ -135,6 +135,7 @@ class AskQuestionUseCase:
                 {
                     "chunk_id": chunk.chunk_id,
                     "doc_id": chunk.doc_id,
+                    "title": chunk.title,
                     "chunk_index": chunk.chunk_index,
                     "text_snippet": chunk.text[:200],
                     "confidentiality_level": chunk.confidentiality_level,

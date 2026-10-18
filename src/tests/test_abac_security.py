@@ -23,6 +23,7 @@ from adapters.qdrant.qdrant_adapter import (
 from adapters.openrouter.embedding_adapter import OpenRouterEmbeddingAdapter
 from adapters.openrouter.chat_adapter import OpenRouterChatAdapter
 from application.use_cases.ask_question import AskQuestionUseCase
+from application.use_cases.ingest_document import IngestDocumentUseCase
 from adapters.postgresql.postgres_adapter import PostgresAdapter
 from application.services.context_builder import build_context
 
@@ -240,6 +241,47 @@ def test_qdrant_search_inactive_user_gets_nothing_without_querying():
 
     assert results == []
     adapter.client.query_points.assert_not_called()
+
+
+def test_ingest_writes_document_title_to_qdrant_payload():
+    adapter = QdrantAdapter.__new__(QdrantAdapter)
+    adapter.client = MagicMock()
+    embedding = MagicMock(spec=OpenRouterEmbeddingAdapter)
+    embedding.embed_passage.return_value = [[0.0]]
+    uc = IngestDocumentUseCase(embedding_adapter=embedding, vector_store=adapter, document_store=None)
+
+    uc.execute(doc_id="doc-001", title="Company Press Release Q3 2024", text="Revenue: $45M",
+               confidentiality_level=1, department="all", classification="public",
+               owner="communications", tenant_id="t_acme_corp_001", source_path="x.md")
+
+    point = adapter.client.upsert.call_args.kwargs["points"][0]
+    assert point.payload["title"] == "Company Press Release Q3 2024"
+
+
+def test_qdrant_search_returns_title_from_payload():
+    adapter = QdrantAdapter.__new__(QdrantAdapter)
+    adapter.client = MagicMock()
+    hit = MagicMock(id="p1", score=0.5, payload={"doc_id": "doc-001", "title": "Company Press Release Q3 2024"})
+    adapter.client.query_points.return_value.points = [hit]
+    user = make_user("u_alice", "t_acme_corp_001", ["engineer"], "engineering", 2)
+
+    results = adapter.search([0.0], user)
+
+    assert results[0].chunk.title == "Company Press Release Q3 2024"
+
+
+def test_cited_source_includes_document_title():
+    chunk = Chunk(chunk_id="doc-001#0", doc_id="doc-001", title="Company Press Release Q3 2024",
+                  text="Revenue: $45M", confidentiality_level=1, department="all",
+                  classification="public", owner="communications",
+                  metadata={"tenant_id": "t_acme_corp_001"})
+    uc = make_use_case([chunk])
+    uc.chat.generate_answer.return_value = "Revenue was $45M. doc-001#0"
+    user = make_user("u_alice", "t_acme_corp_001", ["engineer"], "engineering", 2)
+
+    result = uc.execute(question="What was Q3 revenue?", user_context=user)
+
+    assert result["sources"][0]["title"] == "Company Press Release Q3 2024"
 
 
 def test_context_builder_truncates_to_token_budget():

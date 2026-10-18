@@ -68,6 +68,7 @@ class QdrantAdapter(VectorStorePort):
             payload = {
                 "chunk_id": chunk.chunk_id,
                 "doc_id": chunk.doc_id,
+                "title": chunk.title,
                 "text": chunk.text,
                 "chunk_index": chunk.chunk_index,
                 "confidentiality_level": chunk.confidentiality_level,
@@ -134,6 +135,7 @@ class QdrantAdapter(VectorStorePort):
             chunk = Chunk(
                 chunk_id=payload.get("chunk_id", ""),
                 doc_id=payload.get("doc_id", ""),
+                title=payload.get("title", ""),
                 text=payload.get("text", ""),
                 confidentiality_level=payload.get("confidentiality_level", 0),
                 department=payload.get("department", ""),

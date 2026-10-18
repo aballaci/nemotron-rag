@@ -47,6 +47,7 @@ class IngestDocumentUseCase:
         chunks = self._chunk_text(
             text=text,
             doc_id=doc_id,
+            title=title,
             chunk_size=chunk_size,
             overlap=overlap,
             confidentiality_level=confidentiality_level,
@@ -85,6 +86,7 @@ class IngestDocumentUseCase:
         self,
         text: str,
         doc_id: str,
+        title: str,
         chunk_size: int,
         overlap: int,
         confidentiality_level: int,
@@ -110,6 +112,7 @@ class IngestDocumentUseCase:
             chunk = Chunk(
                 chunk_id=f"{doc_id}#{index}",
                 doc_id=doc_id,
+                title=title,
                 text=chunk_text,
                 confidentiality_level=confidentiality_level,
                 department=department,

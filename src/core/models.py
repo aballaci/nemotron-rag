@@ -21,6 +21,7 @@ class Chunk:
     department: str
     classification: str
     owner: str
+    title: str = ""
     chunk_index: int = 0
     token_count: Optional[int] = None
     vector_id: Optional[str] = None

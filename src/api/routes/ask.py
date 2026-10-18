@@ -88,6 +88,7 @@ class AskRequest(BaseModel):
 class SourceCitation(BaseModel):
     chunk_id: str
     doc_id: str
+    title: str = ""
     chunk_index: int
     text_snippet: str
     confidentiality_level: int
@@ -126,6 +127,7 @@ async def ask_question(
                 SourceCitation(
                     chunk_id=s["chunk_id"],
                     doc_id=s["doc_id"],
+                    title=s["title"],
                     chunk_index=s["chunk_index"],
                     text_snippet=s["text_snippet"],
                     confidentiality_level=s["confidentiality_level"],
