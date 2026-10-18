@@ -17,6 +17,7 @@ from ports.vector_store_port import VectorStorePort
 COLLECTION_NAME = "company_knowledge"
 VECTOR_SIZE = 2048  # Nemotron-3-Embed-1B output dimension
 ALL_DEPARTMENTS = "all"
+ACTIVE_EMPLOYMENT_STATUS = "active"
 
 
 class QdrantAdapter(VectorStorePort):
@@ -96,6 +97,11 @@ class QdrantAdapter(VectorStorePort):
         top_k: int = 5,
     ) -> List[RetrievalResult]:
         """Search for similar chunks, pre-filtered by user attributes."""
+        # employment_status is a subject attribute, not a chunk field, so it
+        # can't be a payload condition; deny before querying instead.
+        if user_context.employment_status != ACTIVE_EMPLOYMENT_STATUS:
+            return []
+
         # ABAC pre-filter via Qdrant payload conditions
         filter_conditions = qmodels.Filter(
             must=[

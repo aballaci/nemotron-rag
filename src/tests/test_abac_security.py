@@ -15,7 +15,11 @@ from unittest.mock import MagicMock
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
 from core.models import Chunk, RetrievalResult, UserContext
-from adapters.qdrant.qdrant_adapter import ALL_DEPARTMENTS, QdrantAdapter
+from adapters.qdrant.qdrant_adapter import (
+    ACTIVE_EMPLOYMENT_STATUS,
+    ALL_DEPARTMENTS,
+    QdrantAdapter,
+)
 from adapters.openrouter.embedding_adapter import OpenRouterEmbeddingAdapter
 from adapters.openrouter.chat_adapter import OpenRouterChatAdapter
 from application.use_cases.ask_question import AskQuestionUseCase
@@ -54,7 +58,7 @@ class FakeQdrantAdapter(QdrantAdapter):
                 continue
             if chunk.confidentiality_level > user_context.clearance_level:
                 continue
-            if user_context.employment_status != "active":
+            if user_context.employment_status != ACTIVE_EMPLOYMENT_STATUS:
                 continue
             results.append(
                 RetrievalResult(chunk=chunk, score=0.9 - len(results) * 0.1)
@@ -116,6 +120,12 @@ CHUNKS = [
     make_chunk("doc-011", "HR investigation workplace complaint", 4, "hr", 0),
     make_chunk("doc-012", "IT incident data breach attempt", 4, "it", 0),
 ]
+CHUNKS_BY_ID = {c.chunk_id: c for c in CHUNKS}
+
+
+def retrieved_chunks(result: dict) -> List[Chunk]:
+    """Chunks the use case retrieved (ABAC-filtered), independent of citations."""
+    return [CHUNKS_BY_ID[chunk_id] for chunk_id in result["retrieved_chunk_ids"]]
 
 
 def make_use_case(chunks: List[Chunk] = CHUNKS) -> AskQuestionUseCase:
@@ -145,7 +155,7 @@ def test_alice_clearance_2_cannot_see_tier_3():
     user = make_user("u_alice", "t_acme_corp_001", ["engineer"], "engineering", 2)
     result = uc.execute(question="What are the engineering salary bands?", user_context=user)
 
-    retrieved_tiers = {s["confidentiality_level"] for s in result["sources"]}
+    retrieved_tiers = {c.confidentiality_level for c in retrieved_chunks(result)}
     assert 3 not in retrieved_tiers, "Alice (Clearance 2) must NOT see Tier 3 salary data"
     assert 4 not in retrieved_tiers, "Alice (Clearance 2) must NOT see Tier 4 data"
     print("PASS: Alice (Clearance 2) cannot see Tier 3/4 documents")
@@ -158,7 +168,7 @@ def test_marcus_clearance_3_can_see_tier_3():
     user = make_user("u_marcus", "t_acme_corp_001", ["manager"], "engineering", 3)
     result = uc.execute(question="What are the engineering salary bands?", user_context=user)
 
-    doc_ids = {s["doc_id"] for s in result["sources"]}
+    doc_ids = {c.doc_id for c in retrieved_chunks(result)}
     assert "doc-005" in doc_ids, "Marcus (Clearance 3) must see Tier 3 salary doc-005"
     print("PASS: Marcus (Clearance 3) can see Tier 3 document")
 
@@ -170,7 +180,7 @@ def test_diana_legal_cannot_see_engineering():
     user = make_user("u_diana", "t_acme_corp_001", ["legal_counsel"], "legal", 4)
     result = uc.execute(question="What are the engineering salary bands?", user_context=user)
 
-    departments = {s["department"] for s in result["sources"]}
+    departments = {c.department for c in retrieved_chunks(result)}
     assert "engineering" not in departments, "Diana (Legal) must not see Engineering docs"
     print("PASS: Diana (Legal, Clearance 4) cannot see Engineering documents")
 
@@ -218,6 +228,18 @@ def test_qdrant_search_department_filter_includes_all():
     query_filter = adapter.client.query_points.call_args.kwargs["query_filter"]
     department = next(c for c in query_filter.must if c.key == "department")
     assert department.match.any == ["engineering", ALL_DEPARTMENTS]
+
+
+def test_qdrant_search_inactive_user_gets_nothing_without_querying():
+    adapter = QdrantAdapter.__new__(QdrantAdapter)
+    adapter.client = MagicMock()
+    user = make_user("u_bob", "t_acme_corp_001", ["intern"], "hr", 1,
+                     employment_status="inactive")
+
+    results = adapter.search([0.0], user)
+
+    assert results == []
+    adapter.client.query_points.assert_not_called()
 
 
 def test_context_builder_truncates_to_token_budget():
