@@ -7,6 +7,9 @@ when run from the host.
 
 Usage:
     python scripts/generate_token.py
+    python scripts/generate_token.py --persona diana
+    python scripts/generate_token.py --list-personas
+    python scripts/generate_token.py --persona marcus --clearance 4   # override
     python scripts/generate_token.py --department finance --clearance 3 --ttl 86400
     curl -H "Authorization: Bearer $(python scripts/generate_token.py)" ...
 """
@@ -26,17 +29,45 @@ from adapters.auth.jwt_adapter import JWTAdapter  # noqa: E402
 from adapters.auth.settings import load_jwt_secret  # noqa: E402
 
 
+# Same personas as scripts/console_rag.py
+PERSONAS = {
+    "alice": dict(user="u_alice", roles="engineer", department="engineering", clearance=2),
+    "marcus": dict(user="u_marcus", roles="manager", department="engineering", clearance=3),
+    "diana": dict(user="u_diana", roles="legal_counsel", department="legal", clearance=4),
+    "stranger": dict(user="u_stranger", tenant="t_other_company", roles="admin", department="engineering", clearance=4),
+    "bob": dict(user="u_bob", roles="intern", department="hr", clearance=1, status="inactive"),
+}
+DEFAULTS = dict(
+    user="u_alice", tenant="t_acme_corp_001", roles="engineer",
+    department="engineering", clearance=2, status="active",
+)
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    p.add_argument("--user", default="u_alice")
-    p.add_argument("--tenant", default="t_acme_corp_001")
-    p.add_argument("--roles", default="engineer", help="comma-separated")
-    p.add_argument("--department", default="engineering")
-    p.add_argument("--clearance", type=int, default=2)
-    p.add_argument("--status", default="active", help="employment_status")
+    p.add_argument("--persona", choices=sorted(PERSONAS), help="preset user (flags below override it)")
+    p.add_argument("--list-personas", action="store_true", help="show presets and exit")
+    p.add_argument("--user")
+    p.add_argument("--tenant")
+    p.add_argument("--roles", help="comma-separated")
+    p.add_argument("--department")
+    p.add_argument("--clearance", type=int)
+    p.add_argument("--status", help="employment_status")
     p.add_argument("--contractor", action="store_true")
     p.add_argument("--ttl", type=int, default=3600, help="seconds")
     args = p.parse_args()
+
+    if args.list_personas:
+        for name, v in PERSONAS.items():
+            c = {**DEFAULTS, **v}
+            print(f"{name:9} {c['user']:11} {c['tenant']:16} {c['department']:12} "
+                  f"clearance={c['clearance']} {c['status']} roles={c['roles']}")
+        return
+
+    base = {**DEFAULTS, **PERSONAS.get(args.persona, {})}
+    for key in DEFAULTS:
+        if getattr(args, key) is None:
+            setattr(args, key, base[key])
 
     if not os.getenv("JWT_SECRET_FILE"):
         host_secret = ROOT / "secrets" / "jwt_secret.txt"

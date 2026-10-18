@@ -10,7 +10,7 @@ A multi-tier hybrid Retrieval-Augmented Generation (RAG) agent built on a single
 - Ingests documents (PDF, Markdown, text) into a vector store with chunk-level metadata.
 - Embeds documents and user queries via OpenRouter (`nvidia/nemotron-3-embed-1b`).
 - Retrieves relevant context using hybrid semantic + keyword search, pre-filtered by user attributes.
-- Generates grounded answers via OpenRouter (`nvidia/nemotron-3.5-super-vl`) using only retrieved context.
+- Generates answers via OpenRouter (`nvidia/nemotron-3.5-super-vl`). It uses and cites retrieved context when it is relevant; otherwise the model answers normally from its own knowledge with no citations.
 - Enforces confidentiality tiers (`public`, `internal`, `confidential`, `restricted`) at retrieval time so users never see unauthorized documents.
 - Provides a Streamlit chat + ingestion UI on port 8501.
 - Logs every query and retrieved chunk for auditability (not yet wired; see Known limitations).
@@ -212,21 +212,48 @@ The JWT must carry these subject attributes (used for ABAC pre-filtering):
 - `clearance_level` — numeric clearance (must be >= resource tier)
 - `employment_status` — must be `"active"`
 
-Generate a dev token with the JWT adapter:
+### Generating dev tokens
+
+`scripts/generate_token.py` prints a signed dev JWT. Use `--persona` for a preset user, or set individual fields:
 
 ```bash
-export PYTHONPATH=src
-python3 -c "
-from adapters.auth.jwt_adapter import JWTAdapter
-a = JWTAdapter(secret='changeme-please-replace-with-a-strong-secret')
-print(a.generate_test_token(
-    user_id='u_alice', tenant_id='t_acme_corp_001',
-    roles=['engineer'], department='engineering', clearance_level=2,
-))
-"
+.venv/bin/python scripts/generate_token.py                       # default: alice
+.venv/bin/python scripts/generate_token.py --list-personas
+.venv/bin/python scripts/generate_token.py --persona diana
+.venv/bin/python scripts/generate_token.py --persona bob --clearance 3   # preset + override
+.venv/bin/python scripts/generate_token.py --user u_x --department hr --clearance 1 --ttl 86400
 ```
 
-Set `JWT_SECRET` in `.env` before any shared deployment (the default is intentionally insecure).
+| Persona | User | Tenant | Department | Clearance | Status | Use it to test |
+|---------|------|--------|------------|-----------|--------|----------------|
+| `alice` (default) | `u_alice` | `t_acme_corp_001` | engineering | 2 | active | normal engineer access |
+| `marcus` | `u_marcus` | `t_acme_corp_001` | engineering | 3 | active | higher clearance, same department |
+| `diana` | `u_diana` | `t_acme_corp_001` | legal | 4 | active | other department |
+| `stranger` | `u_stranger` | `t_other_company` | engineering | 4 | active | tenant isolation |
+| `bob` | `u_bob` | `t_acme_corp_001` | hr | 1 | inactive | offboarded user is denied |
+
+Flags: `--user`, `--tenant`, `--roles` (comma-separated), `--department`, `--clearance`, `--status`, `--contractor`, `--ttl` (seconds, default 3600). Explicit flags override the persona. These personas match the ones in `scripts/console_rag.py`.
+
+Use a token in a request or paste it into the **JWT Bearer Token** field in the UI sidebar:
+
+```bash
+curl -X POST http://localhost:8000/api/v1/ask \
+  -H "Authorization: Bearer $(.venv/bin/python scripts/generate_token.py --persona diana)" \
+  -H "Content-Type: application/json" \
+  -d '{"question": "Who is the CTO?"}'
+```
+
+(The API port is not published by default; see [Endpoints](#endpoints).)
+
+### JWT signing secret
+
+The API and the token script resolve the secret the same way, first match wins:
+
+1. the file named by `JWT_SECRET_FILE` (compose mounts `secrets/jwt_secret.txt`; the script uses that file directly when run on the host)
+2. the `JWT_SECRET` environment variable
+3. the built-in dev default `changeme-please-replace-with-a-strong-secret`
+
+`secrets/jwt_secret.txt` currently holds the dev default. To change the secret, edit that file and restart `api`; previously issued tokens become invalid. Replace the default before any shared deployment.
 
 ## Known limitations
 
