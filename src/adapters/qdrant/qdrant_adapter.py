@@ -16,6 +16,7 @@ from ports.vector_store_port import VectorStorePort
 
 COLLECTION_NAME = "company_knowledge"
 VECTOR_SIZE = 2048  # Nemotron-3-Embed-1B output dimension
+ALL_DEPARTMENTS = "all"
 
 
 class QdrantAdapter(VectorStorePort):
@@ -108,7 +109,7 @@ class QdrantAdapter(VectorStorePort):
                 ),
                 qmodels.FieldCondition(
                     key="department",
-                    match=qmodels.MatchValue(value=user_context.department),
+                    match=qmodels.MatchAny(any=[user_context.department, ALL_DEPARTMENTS]),
                 ),
             ]
         )

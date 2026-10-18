@@ -15,7 +15,7 @@ from unittest.mock import MagicMock
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
 from core.models import Chunk, RetrievalResult, UserContext
-from adapters.qdrant.qdrant_adapter import QdrantAdapter
+from adapters.qdrant.qdrant_adapter import ALL_DEPARTMENTS, QdrantAdapter
 from adapters.openrouter.embedding_adapter import OpenRouterEmbeddingAdapter
 from adapters.openrouter.chat_adapter import OpenRouterChatAdapter
 from application.use_cases.ask_question import AskQuestionUseCase
@@ -50,7 +50,7 @@ class FakeQdrantAdapter(QdrantAdapter):
             # ABAC rules: tenant match + department match + clearance check
             if chunk.metadata.get("tenant_id") != user_context.tenant_id:
                 continue
-            if chunk.department != user_context.department:
+            if chunk.department not in (user_context.department, ALL_DEPARTMENTS):
                 continue
             if chunk.confidentiality_level > user_context.clearance_level:
                 continue
@@ -197,6 +197,27 @@ def test_inactive_user_gets_nothing():
     assert result["retrieved_chunk_ids"] == [], "Inactive user must retrieve 0 chunks"
     assert result["context_used"] is False
     print("PASS: Inactive user gets nothing")
+
+
+def test_engineer_can_see_company_wide_press_release():
+    uc = make_use_case()
+    user = make_user("u_alice", "t_acme_corp_001", ["engineer"], "engineering", 1)
+    result = uc.execute(question="What was Q3 2024 revenue?", user_context=user)
+
+    assert "doc-001#0" in result["retrieved_chunk_ids"]
+
+
+def test_qdrant_search_department_filter_includes_all():
+    adapter = QdrantAdapter.__new__(QdrantAdapter)
+    adapter.client = MagicMock()
+    adapter.client.query_points.return_value.points = []
+    user = make_user("u_alice", "t_acme_corp_001", ["engineer"], "engineering", 2)
+
+    adapter.search([0.0], user)
+
+    query_filter = adapter.client.query_points.call_args.kwargs["query_filter"]
+    department = next(c for c in query_filter.must if c.key == "department")
+    assert department.match.any == ["engineering", ALL_DEPARTMENTS]
 
 
 def test_context_builder_truncates_to_token_budget():
