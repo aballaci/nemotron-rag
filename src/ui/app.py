@@ -10,12 +10,18 @@ RAG_API_BASE_URL env var). Two tabs:
 from __future__ import annotations
 
 import os
+import re
 from typing import Any
 
 import requests
 import streamlit as st
 
 API_BASE = os.getenv("RAG_API_BASE_URL", "http://localhost:8000")
+
+# Tier names from spec-kit/policy/classification.md
+TIER_LABELS = {1: "Public", 2: "Internal", 3: "Confidential", 4: "Restricted"}
+TIER_COLORS = {1: "green", 2: "blue", 3: "orange", 4: "red"}
+SNIPPET_MARKUP = re.compile(r"[#*|`>_]+")
 
 
 def _auth_headers() -> dict[str, str]:
@@ -24,6 +30,39 @@ def _auth_headers() -> dict[str, str]:
     if not token:
         return {}
     return {"Authorization": f"Bearer {token}"}
+
+
+def _citation_ref(src: dict[str, Any]) -> str:
+    return f"{src.get('doc_id', '?')}#{src.get('chunk_index', '?')}"
+
+
+def _number_citations(answer: str, sources: list[dict[str, Any]]) -> str:
+    """Replace raw chunk refs (doc-001#0) in the answer with [n] markers."""
+    for i, src in enumerate(sources, 1):
+        ref = re.escape(_citation_ref(src))
+        answer = re.sub(rf"[\[(]?(?:Chunk\s+)?{ref}[\])]?", f"**[{i}]**", answer)
+    return answer
+
+
+def _plain_snippet(text: str) -> str:
+    """Flatten markdown so a snippet can't render as headings or tables."""
+    return " ".join(SNIPPET_MARKUP.sub(" ", text).split())
+
+
+def _render_sources(sources: list[dict[str, Any]]) -> None:
+    st.markdown("##### Sources")
+    for i, src in enumerate(sources, 1):
+        level = src.get("confidentiality_level", 0)
+        tier = TIER_LABELS.get(level, f"Level {level}")
+        color = TIER_COLORS.get(level, "gray")
+        with st.container(border=True):
+            st.markdown(
+                f"**[{i}] {src.get('doc_id', '?')}** · chunk {src.get('chunk_index', '?')}  \n"
+                f":{color}-badge[{tier}] :gray-badge[{src.get('department', '?')}] "
+                f"relevance {src.get('score', 0):.2f}"
+            )
+            with st.expander("Excerpt"):
+                st.text(_plain_snippet(src.get("text_snippet", "")))
 
 
 def _post(path: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -70,24 +109,14 @@ def render_ask_tab() -> None:
         context_used = data.get("context_used", False)
 
         if context_used:
-            st.success(answer)
+            st.success(_number_citations(answer, sources))
         else:
             st.warning(answer)
 
         st.caption(f"Model: {model}  |  Context used: {context_used}")
 
         if sources:
-            st.subheader("Sources")
-            for i, src in enumerate(sources, 1):
-                with st.expander(
-                    f"[{i}] {src.get('doc_id', '?')} · chunk {src.get('chunk_index', '?')} "
-                    f"· score {src.get('score', 0):.3f}"
-                ):
-                    st.write(src.get("text_snippet", ""))
-                    st.caption(
-                        f"department={src.get('department', '?')} · "
-                        f"confidentiality_level={src.get('confidentiality_level', '?')}"
-                    )
+            _render_sources(sources)
 
 
 def render_ingest_tab() -> None:
