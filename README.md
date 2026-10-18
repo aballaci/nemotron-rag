@@ -19,7 +19,7 @@ A multi-tier hybrid Retrieval-Augmented Generation (RAG) agent built on a single
 - No local model inference (no GPUs, no CUDA, no local Transformers serving).
 - No ACL user-lists stored on chunks (access is attribute- and policy-based).
 - No chat history or multi-turn conversation memory (stateless per request).
-- No authentication yet: `/api/v1/ask` uses a hardcoded demo `UserContext` (see Known limitations).
+- Authentication via Bearer JWT on `/api/v1/ask` and `/api/v1/ingest`.
 
 ---
 
@@ -197,11 +197,40 @@ To call the API from the host, use `docker exec rag-api python -c ...` or tempor
 
 ---
 
+## Authentication
+
+Both `/api/v1/ask` and `/api/v1/ingest` require a Bearer JWT:
+
+```bash
+curl -X POST http://localhost:8000/api/v1/ask   -H "Authorization: Bearer <jwt>"   -H "Content-Type: application/json"   -d '{"question": "What are the engineering salary bands?"}'
+```
+
+The JWT must carry these subject attributes (used for ABAC pre-filtering):
+- `sub` — user id
+- `tenant_id` — tenant (must match chunk tenant)
+- `department` — user department (must match chunk department)
+- `clearance_level` — numeric clearance (must be >= resource tier)
+- `employment_status` — must be `"active"`
+
+Generate a dev token with the JWT adapter:
+
+```bash
+export PYTHONPATH=src
+python3 -c "
+from adapters.auth.jwt_adapter import JWTAdapter
+a = JWTAdapter(secret='changeme-please-replace-with-a-strong-secret')
+print(a.generate_test_token(
+    user_id='u_alice', tenant_id='t_acme_corp_001',
+    roles=['engineer'], department='engineering', clearance_level=2,
+))
+"
+```
+
+Set `JWT_SECRET` in `.env` before any shared deployment (the default is intentionally insecure).
+
 ## Known limitations
 
 - `rag-silo` crash-loops (the container prints its help text instead of starting). The API does not depend on it, but raw-document storage is unavailable until the command is fixed.
-- `/api/v1/ask` uses a hardcoded demo `UserContext` instead of validating a JWT.
-- Audit logging is skipped: `AskQuestionUseCase` is constructed with `postgres_adapter=None`, so no audit rows are written.
 - The Qdrant healthcheck uses `$line`, which Compose tries to interpolate (warning: `"line" variable is not set`). Escape it as `$$line`.
 - Local `secrets/*.txt` files may still contain placeholder values (e.g. `changeme`); replace them before any shared deployment.
 
