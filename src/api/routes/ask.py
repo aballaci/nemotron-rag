@@ -20,11 +20,14 @@ IMPORTANT (Documentation Handoff):
 
 from __future__ import annotations
 
+from typing import List
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from adapters.openrouter.chat_adapter import OpenRouterChatAdapter
 from adapters.qdrant.qdrant_adapter import QdrantAdapter
+from adapters.openrouter.settings import load_openrouter_api_key
 from adapters.openrouter.embedding_adapter import OpenRouterEmbeddingAdapter
 from application.use_cases.ask_question import AskQuestionUseCase
 from core.models import UserContext
@@ -58,11 +61,11 @@ class AskResponse(BaseModel):
 
 # Module-level singletons (wired once at import time)
 _embedding = OpenRouterEmbeddingAdapter(
-    api_key="PLACEHOLDER",  # TODO: inject from settings/env
+    api_key=load_openrouter_api_key(),
 )
 _vector_store = QdrantAdapter()
 _chat = OpenRouterChatAdapter(
-    api_key="PLACEHOLDER",  # TODO: inject from settings/env
+    api_key=load_openrouter_api_key(),
 )
 use_case = AskQuestionUseCase(
     embedding_adapter=_embedding,

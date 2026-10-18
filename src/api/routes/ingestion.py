@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from adapters.qdrant.qdrant_adapter import QdrantAdapter
+from adapters.openrouter.settings import load_openrouter_api_key
 from adapters.openrouter.embedding_adapter import OpenRouterEmbeddingAdapter
 from application.use_cases.ingest_document import IngestDocumentUseCase
 
@@ -40,7 +41,7 @@ async def ingest_document(request: IngestRequest):
     """Ingest a single document into the RAG knowledge base."""
     try:
         embedding_adapter = OpenRouterEmbeddingAdapter(
-            api_key="PLACEHOLDER",  # TODO: inject from settings/env
+            api_key=load_openrouter_api_key(),
         )
         vector_store = QdrantAdapter()
         vector_store.create_collection()

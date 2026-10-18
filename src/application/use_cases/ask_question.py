@@ -35,6 +35,11 @@ class AskQuestionUseCase:
         self.postgres = postgres_adapter
         self.top_k = top_k
 
+    def _audit(self, **kwargs) -> None:
+        """Write an audit record if a Postgres adapter is configured."""
+        if self.postgres is not None:
+            self.postgres.log_audit(**kwargs)
+
     def execute(
         self,
         question: str,
@@ -55,7 +60,7 @@ class AskQuestionUseCase:
         query_hash = hashlib.sha256(question.encode("utf-8")).hexdigest()
 
         if not context_block:
-            self.postgres.log_audit(
+            self._audit(
                 user_id=user_context.user_id,
                 query_hash=query_hash,
                 retrieved_chunk_ids=[],
@@ -86,7 +91,7 @@ class AskQuestionUseCase:
         latency_ms = int((time.time() - start_time) * 1000)
 
         # 6. Audit log
-        self.postgres.log_audit(
+        self._audit(
             user_id=user_context.user_id,
             query_hash=query_hash,
             retrieved_chunk_ids=[r.chunk.chunk_id for r in results],
