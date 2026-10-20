@@ -30,3 +30,6 @@ __pycache__/
 
 # Local raw-document store (runtime artifact, regenerate with scripts/generate_test_data.py)
 data/
+
+# macOS
+.DS_Store
